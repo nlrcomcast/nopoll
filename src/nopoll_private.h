@@ -1,6 +1,6 @@
 /*
  *  LibNoPoll: A websocket library
- *  Copyright (C) 2022 Advanced Software Production Line, S.L.
+ *  Copyright (C) 2017 Advanced Software Production Line, S.L.
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public License
@@ -274,13 +274,6 @@ struct _noPollConn {
 	 */
 	nopoll_bool   pending_ssl_accept;
 
-        /**
-         * @internal Flag that indicates that the provided session
-         * is in the process of doing a TLS handshake and must not
-         * be read or written to by any other function than SSL_Connect()
-         */
-        nopoll_bool   pending_ssl_connect;
-
 	/* SSL support */
 	SSL_CTX        * ssl_ctx;
 	SSL            * ssl;
@@ -418,10 +411,6 @@ struct _noPollConnOpts {
 
 	/* extra HTTP headers to send during the connection */
 	char * extra_headers;
-
-	/* control whether origin header is added or not (see
-	 * nopoll_conn_opts_add_origin_header) */
-	nopoll_bool add_origin_header;
 };
 
 #endif

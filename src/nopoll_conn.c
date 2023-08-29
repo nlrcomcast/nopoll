@@ -1,6 +1,6 @@
 /*
  *  LibNoPoll: A websocket library
- *  Copyright (C) 2022 Advanced Software Production Line, S.L.
+ *  Copyright (C) 2017 Advanced Software Production Line, S.L.
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public License
@@ -300,11 +300,11 @@ NOPOLL_SOCKET __nopoll_conn_sock_connect_opts_internal (noPollCtx       * ctx,
 	/* do a tcp connect */
         if (connect (session, res->ai_addr, res->ai_addrlen) < 0) {
 		if(errno != NOPOLL_EINPROGRESS && errno != NOPOLL_EWOULDBLOCK && errno != NOPOLL_ENOTCONN) { 
-			nopoll_log (ctx, NOPOLL_LEVEL_WARNING, "unable to connect to remote host %s:%s errno=%d",
-				    host, port, errno);
-
 		        shutdown (session, SHUT_RDWR);
                         nopoll_close_socket (session);
+
+			nopoll_log (ctx, NOPOLL_LEVEL_WARNING, "unable to connect to remote host %s:%s errno=%d",
+				    host, port, errno);
 
 			/* relase address info */
 			freeaddrinfo (res);
@@ -400,7 +400,7 @@ char * __nopoll_conn_get_client_init (noPollConn * conn, noPollConnOpts * opts)
 				     "\r\nConnection: Upgrade"
 				     "\r\nSec-WebSocket-Key: %s"
 				     "\r\nSec-WebSocket-Version: %d"
-				     "%s%s"
+				     "\r\nOrigin: %s"
 				     "%s%s"  /* Cookie */
 				     "%s%s"  /* protocol part */
 				     "%s"    /* extra arbitrary headers */
@@ -411,9 +411,8 @@ char * __nopoll_conn_get_client_init (noPollConn * conn, noPollConnOpts * opts)
 				     key,
 				     /* sec-websocket-version */
 				     conn->ctx->protocol_version,
-				     /* Origin (support not sending Origin: header in case it is not defined) */
-				     (conn->origin != NULL && (opts == NULL || opts->add_origin_header)) ? "\r\nOrigin: " : "",
-				     (conn->origin != NULL && (opts == NULL || opts->add_origin_header)) ? conn->origin : "",
+				     /* Origin */
+				     conn->origin,
 				     /* Cookie */
 				     (opts && opts->cookie) ? "\r\nCookie: " : "",
 				     (opts && opts->cookie) ? opts->cookie : "",
@@ -934,16 +933,12 @@ noPollConn * __nopoll_conn_new_common (noPollCtx       * ctx,
 			return conn;
 		} /* end if */
 		
-		/* set server name indication (SNI) */
-		SSL_set_tlsext_host_name(conn->ssl, conn->host_name);
-
 		/* set socket */
 		SSL_set_fd (conn->ssl, conn->session);
 
 		/* do the initial connect connect */
 		nopoll_log (ctx, NOPOLL_LEVEL_DEBUG, "connecting to remote TLS site %s:%s", conn->host, conn->port);
 		iterator = 0;
-                conn->pending_ssl_connect = nopoll_true;
 		while (SSL_connect (conn->ssl) <= 0) {
 		
 			/* get ssl error */
@@ -1042,7 +1037,6 @@ noPollConn * __nopoll_conn_new_common (noPollCtx       * ctx,
 		conn->send    = nopoll_conn_tls_send;
 
 		nopoll_log (ctx, NOPOLL_LEVEL_DEBUG, "TLS I/O handlers configured");
-                conn->pending_ssl_connect = nopoll_false;
 		conn->tls_on = nopoll_true;
 	} /* end if */
 
@@ -1386,9 +1380,7 @@ noPollConn * nopoll_conn_tls_new (noPollCtx  * ctx,
 	/* init ssl ciphers and engines */
 	if (! __nopoll_tls_was_init) {
 		__nopoll_tls_was_init = nopoll_true;
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
 		SSL_library_init ();
-#endif
 	} /* end if */
 
 	/* call common implementation */
@@ -1434,9 +1426,7 @@ noPollConn * nopoll_conn_tls_new6 (noPollCtx  * ctx,
 	/* init ssl ciphers and engines */
 	if (! __nopoll_tls_was_init) {
 		__nopoll_tls_was_init = nopoll_true;
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
 		SSL_library_init ();
-#endif
 	} /* end if */
 
 	/* call common implementation */
@@ -1505,9 +1495,7 @@ noPollConn * nopoll_conn_tls_new_with_socket (noPollCtx  * ctx,
 	/* init ssl ciphers and engines */
 	if (! __nopoll_tls_was_init) {
 		__nopoll_tls_was_init = nopoll_true;
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
 		SSL_library_init ();
-#endif
 	} /* end if */
 
 	/* call common implementation */
@@ -2647,7 +2635,7 @@ nopoll_bool nopoll_conn_complete_handshake_check_listener (noPollCtx * ctx, noPo
 
 	/* update default origin check (Origin: header must be
 	 * defined, event though RFC says SHOULD it should have been
-	 * MUST because otherwise, server side cannot check this
+	 * MUST because other wise, server side cannot check this
 	 * value which is crucial for security reasons */
 	origin_check = conn->origin != NULL;
 
@@ -3076,9 +3064,6 @@ noPollMsg   * nopoll_conn_get_msg (noPollConn * conn)
 	if (conn == NULL)
 		return NULL;
 
-        if (conn->pending_ssl_connect)
-            return NULL;  /* Let the loop in conn_new_common handle this */
-
 	nopoll_log (conn->ctx, NOPOLL_LEVEL_DEBUG, 
 		    "=== START: conn-id=%d (errno=%d, session: %d, conn->handshake_ok: %d, conn->pending_ssl_accept: %d) ===", 
 		    conn->id, errno, conn->session, conn->handshake_ok, conn->pending_ssl_accept);
@@ -3172,7 +3157,7 @@ noPollMsg   * nopoll_conn_get_msg (noPollConn * conn)
 	} /* end if */
 
 	if (conn->previous_msg) {
-		nopoll_log (conn->ctx, NOPOLL_LEVEL_DEBUG, "Reading bytes (previously read %d) from a previous unfinished frame (pending: %d) over conn-id=%d",
+		nopoll_log (conn->ctx, NOPOLL_LEVEL_WARNING, "Reading bytes (previously read %d) from a previous unfinished frame (pending: %d) over conn-id=%d",
 			    conn->previous_msg->payload_size, conn->previous_msg->remain_bytes, conn->id);
 
 		if (conn->read_pending_header) {
@@ -3209,7 +3194,7 @@ noPollMsg   * nopoll_conn_get_msg (noPollConn * conn)
 			memcpy (msg->mask, conn->previous_msg->mask, 4);
 			
 			if (msg->is_masked) {
-				nopoll_log (conn->ctx, NOPOLL_LEVEL_DEBUG, "Reusing mask value = %d from previous frame", nopoll_get_32bit (msg->mask));
+				nopoll_log (conn->ctx, NOPOLL_LEVEL_DEBUG, "Reusing mask value = %d from previous frame (%d)", nopoll_get_32bit (msg->mask));
 				nopoll_show_byte (conn->ctx, msg->mask[0], "mask[0]");
 				nopoll_show_byte (conn->ctx, msg->mask[1], "mask[1]");
 				nopoll_show_byte (conn->ctx, msg->mask[2], "mask[2]");
@@ -3262,7 +3247,7 @@ noPollMsg   * nopoll_conn_get_msg (noPollConn * conn)
 	bytes = __nopoll_conn_receive (conn, buffer, 2);
 	if (bytes == 0) {
 		/* connection not ready */
-		nopoll_log (conn->ctx, NOPOLL_LEVEL_DEBUG, "Connection id=%d without data, errno=%d : %s, returning no message",
+		nopoll_log (conn->ctx, NOPOLL_LEVEL_WARNING, "Connection id=%d without data, errno=%d : %s, returning no message", 
 			    conn->id, errno, strerror (errno));
 		return NULL;
 	}
@@ -3278,7 +3263,7 @@ noPollMsg   * nopoll_conn_get_msg (noPollConn * conn)
 		memcpy (conn->pending_buf + conn->pending_buf_bytes, buffer, bytes);
 		conn->pending_buf_bytes += bytes;
 		
-		nopoll_log (conn->ctx, NOPOLL_LEVEL_DEBUG,
+		nopoll_log (conn->ctx, NOPOLL_LEVEL_WARNING, 
 			    "Expected to receive complete websocket frame header but found only %d bytes over conn-id=%d, saving to reuse later",
 			    bytes, conn->id);
 		return NULL;
@@ -3439,7 +3424,7 @@ noPollMsg   * nopoll_conn_get_msg (noPollConn * conn)
 			/* release message because it not available here */
 			nopoll_msg_unref (msg);
 			if (bytes >= 0 && nopoll_conn_is_ok (conn)) {
-				nopoll_log (conn->ctx, NOPOLL_LEVEL_DEBUG,
+				nopoll_log (conn->ctx, NOPOLL_LEVEL_WARNING, 
 					    "Expected to receive incoming mask after header (4 bytes) but found %d bytes on conn-id=%d, saving %d for future operations ", 
 					    bytes, conn->id, conn->pending_buf_bytes);
 				return NULL;
@@ -3514,7 +3499,7 @@ read_payload:
 	if (msg->remain_bytes > 0) {
 
 		/* set connection in remaining data to read */
-		nopoll_log (conn->ctx, NOPOLL_LEVEL_DEBUG, "Received fewer bytes than expected (bytes: %d < payload size: %d)",
+		nopoll_log (conn->ctx, NOPOLL_LEVEL_WARNING, "Received fewer bytes than expected (bytes: %d < payload size: %d)", 
 			    bytes, (int) msg->payload_size);
 		msg->payload_size = bytes;
 
@@ -4032,15 +4017,6 @@ int           nopoll_conn_read (noPollConn * conn, char * buffer, int bytes, nop
  * See \ref nopoll_conn_read documentation to know more about this
  * function. This API is not useful if you are not using \ref
  * nopoll_conn_read (stream oriented APi).
- *
- * This function is designed to be used *after* you have completed a
- * \ref nopoll_conn_read so you can get a quick indication if there
- * are pending data that can be read without waiting and blocking
- * (especially when you use non blocking I/O).
- *
- * You have an working example at:
- *
- * https://github.com/ASPLes/libvortex-1.1/blob/master/web-socket/vortex_websocket.c#L404
  *
  * @param conn The connection where the operation takes place
  *
@@ -4779,9 +4755,7 @@ nopoll_bool __nopoll_conn_accept_complete_common (noPollCtx * ctx, noPollConnOpt
 		/* init ssl ciphers and engines */
 		if (! __nopoll_tls_was_init) {
 			__nopoll_tls_was_init = nopoll_true;
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
 			SSL_library_init ();
-#endif
 		} /* end if */
 
 		/* now configure chainCertificate */

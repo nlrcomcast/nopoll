@@ -1,6 +1,6 @@
 /*
  *  LibNoPoll: A websocket library
- *  Copyright (C) 2022 Advanced Software Production Line, S.L.
+ *  Copyright (C) 2017 Advanced Software Production Line, S.L.
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public License
@@ -66,7 +66,7 @@ nopoll_bool nopoll_cmp (const char * string1, const char * string2)
 
 	/* next position */
 	iterator = 0;
-	while (string1[iterator] && string2[iterator]) {
+	while (string1[iterator] && string1[iterator]) {
 		if (string1[iterator] != string2[iterator])
 			return nopoll_false;
 		iterator++;
@@ -868,11 +868,9 @@ void nopoll_cleanup_library (void)
 {
 	
 	if (__nopoll_tls_was_init) {
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
 		EVP_cleanup ();
 		CRYPTO_cleanup_all_ex_data ();
 		ERR_free_strings ();
-#endif
 
 		/* notify the library isn't initialized */
 		__nopoll_tls_was_init = nopoll_false;

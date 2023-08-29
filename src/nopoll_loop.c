@@ -1,6 +1,6 @@
 /*
  *  LibNoPoll: A websocket library
- *  Copyright (C) 2022 Advanced Software Production Line, S.L.
+ *  Copyright (C) 2017 Advanced Software Production Line, S.L.
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public License
@@ -61,10 +61,6 @@ nopoll_bool nopoll_loop_register (noPollCtx * ctx, noPollConn * conn, noPollPtr 
 
 		return nopoll_false; /* keep foreach, don't stop */
 	}
-
-        /* Do not listen on sockets that are doing SSL/TLS handshake */
-        if (conn->pending_ssl_connect)
-                return nopoll_false;
 
 	/* register the connection socket */
 	/* nopoll_log (ctx, NOPOLL_LEVEL_DEBUG, "Adding socket id: %d", conn->session);*/
